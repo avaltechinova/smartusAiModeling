@@ -27,8 +27,8 @@ def validate_image_generation(image_generator):
 
 
 def plot_mse(history):
-    loss = history.history['loss']
-    val_loss = history.history['val_loss']
+    loss = history.history['mean_squared_error']
+    val_loss = history.history['mean_squared_error']
     epochs = range(1, len(loss) + 1)
     plt.plot(epochs, loss, 'bo', label='Training mse')
     plt.plot(epochs, val_loss, 'b', label='Validation mse')
