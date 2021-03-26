@@ -10,6 +10,7 @@ from sklearn.neural_network import MLPRegressor
 from sklearn.preprocessing import StandardScaler
 from keras.preprocessing.image import ImageDataGenerator
 from matplotlib import pyplot as plt
+import set_memory_size_tensorflow as sms
 
 
 def validate_image_generation(image_generator):
@@ -26,7 +27,7 @@ def validate_image_generation(image_generator):
         counter += 1
 
 
-def plot_mse(history):
+def plot_mse(history, counter):
     loss = history.history['mean_squared_error']
     val_loss = history.history['mean_squared_error']
     epochs = range(1, len(loss) + 1)
@@ -34,7 +35,7 @@ def plot_mse(history):
     plt.plot(epochs, val_loss, 'b', label='Validation mse')
     plt.title('Training and validation MSE')
     plt.legend()
-    plt.show()
+    plt.savefig('train_val_mse_' + str(counter) + '.png')
 
 
 def show_rgb_matrix_as_image(rgb_matrix):
@@ -42,6 +43,7 @@ def show_rgb_matrix_as_image(rgb_matrix):
     plt.show()
 
 
+sms.set_memory_size()
 # maximum number of additional stacked convolutional-pooling layers
 max_n_extra_layers = 1
 # load csv data with pandas
@@ -54,6 +56,7 @@ print(f'dataset dimension: {df_dataset.shape}')
 samples = df_dataset.to_numpy()
 # k-fold cross-validation with k=5
 kf = KFold(n_splits=5, shuffle=False)
+ann_counter = 0
 
 # loop over cnn architectures
 for i in range(max_n_extra_layers):
@@ -89,7 +92,8 @@ for i in range(max_n_extra_layers):
                                                    batch_size=32)
         conv_net.configure()
         conv_net.train(train_gen, val_gen)
-        plot_mse(conv_net.history)
+        plot_mse(conv_net.history, ann_counter)
+        ann_counter += 1
 
 # create dataset
 # X = np.arange(0, 2 * np.pi, 0.05)
