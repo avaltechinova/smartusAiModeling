@@ -27,15 +27,14 @@ def validate_image_generation(image_generator):
         counter += 1
 
 
-def plot_mse(history, counter):
-    loss = history.history['mean_squared_error']
-    val_loss = history.history['mean_squared_error']
+def plot_mse(training_loss, validation_loss, counter):
     epochs = range(1, len(loss) + 1)
-    plt.plot(epochs, loss, 'bo', label='Training mse')
-    plt.plot(epochs, val_loss, 'b', label='Validation mse')
+    plt.plot(epochs, training_loss, 'bo', label='Training mse')
+    plt.plot(epochs, validation_loss, 'b', label='Validation mse')
     plt.title('Training and validation MSE')
     plt.legend()
     plt.savefig('train_val_mse_' + str(counter) + '.png')
+    plt.clf()
 
 
 def show_rgb_matrix_as_image(rgb_matrix):
@@ -45,7 +44,7 @@ def show_rgb_matrix_as_image(rgb_matrix):
 
 sms.set_memory_size()
 # maximum number of additional stacked convolutional-pooling layers
-max_n_extra_layers = 1
+max_n_extra_layers = 4
 # load csv data with pandas
 df = pd.read_csv(r'/home/adriano/Desktop/ds_agua_fria_garsup.csv')
 # select columns data to create the dataset
@@ -57,11 +56,13 @@ samples = df_dataset.to_numpy()
 # k-fold cross-validation with k=5
 kf = KFold(n_splits=5, shuffle=False)
 ann_counter = 0
+mean_tr_mse_vec = []
+mean_vl_mse_vec = []
 
 # loop over cnn architectures
 for i in range(max_n_extra_layers):
-    sum_tr_mse = 0
-    sum_vl_mse = 0
+    tr_mse_vec = []
+    vl_mse_vec = []
     # create the base cnn model
     conv_net = ConvNet()
     # add additional layers
@@ -92,8 +93,22 @@ for i in range(max_n_extra_layers):
                                                    batch_size=32)
         conv_net.configure()
         conv_net.train(train_gen, val_gen)
-        plot_mse(conv_net.history, ann_counter)
+        loss = conv_net.history.history['mean_squared_error']
+        val_loss = conv_net.history.history['val_mean_squared_error']
+        plot_mse(loss, val_loss, ann_counter)
+
+        tr_mse_vec.append(loss[-1])
+        vl_mse_vec.append(val_loss[-1])
         ann_counter += 1
+
+    mean_tr_mse = np.array(tr_mse_vec).mean()
+    mean_vl_mse = np.array(vl_mse_vec).mean()
+    mean_tr_mse_vec.append(mean_tr_mse)
+    mean_vl_mse_vec.append(mean_vl_mse)
+
+plt.plot(np.arange(3, max_n_extra_layers + 3), mean_tr_mse_vec, 'r-')
+plt.plot(np.arange(3, max_n_extra_layers + 3), mean_vl_mse_vec, 'b-')
+plt.show()
 
 # create dataset
 # X = np.arange(0, 2 * np.pi, 0.05)
