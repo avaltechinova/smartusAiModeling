@@ -55,12 +55,13 @@ print(f'dataset dimension: {df_dataset.shape}')
 samples = df_dataset.to_numpy()
 # k-fold cross-validation with k=5
 kf = KFold(n_splits=5, shuffle=False)
-ann_counter = 0
 mean_tr_mse_vec = []
 mean_vl_mse_vec = []
+counter = 0
 
 # loop over cnn architectures
 for i in range(max_n_extra_layers):
+    ann_counter = 0
     tr_mse_vec = []
     vl_mse_vec = []
     # create the base cnn model
