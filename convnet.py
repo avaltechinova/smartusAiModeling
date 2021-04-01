@@ -12,14 +12,6 @@ class ConvNet:
         self.__model.add(layers.Conv2D(32, (3, 3), activation='relu', input_shape=(130, 240, 3)))
         # self.__model.add(layers.Conv2D(32, (3, 3), activation='relu'))
         self.__model.add(layers.MaxPool2D(2, 2))
-        # self.__model.add(layers.Conv2D(16, (3, 3), activation='relu'))
-        # self.__model.add(layers.Conv2D(16, (3, 3), activation='relu'))
-        # self.__model.add(layers.MaxPool2D(2, 2))
-        # self.__model.add(layers.Conv2D(32, (3, 3), activation='relu'))
-        # self.__model.add(layers.Conv2D(32, (3, 3), activation='relu'))
-        # self.__model.add(layers.MaxPool2D(2, 2))
-        # self.__model.add(layers.Conv2D(64, (3, 3), activation='relu'))
-        # self.__model.add(layers.Conv2D(64, (3, 3), activation='relu'))
 
     def add_layers(self, nr_layers):
         # layers set by the user
@@ -27,7 +19,8 @@ class ConvNet:
             if self.__filter_power <= 7:
                 self.__model.add(layers.Conv2D(2 ** self.__filter_power, (3, 3), activation='relu'))
                 # self.__model.add(layers.Conv2D(2 ** self.__filter_power, (3, 3), activation='relu'))
-                # self.__model.add(layers.MaxPool2D(2, 2))
+                self.__model.add(layers.MaxPool2D(2, 2))
+                self.__model.summary()
                 self.__filter_power += 1
             else:
                 self.__model.add(layers.Conv2D(2 ** self.__filter_power, (3, 3), activation='relu'))
