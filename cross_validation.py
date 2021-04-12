@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
+import csv
+
 import matplotlib.pyplot as plt
 import numpy as np
+import os
 import pandas as pd
 from sklearn.metrics import mean_squared_error
 from convnet import ConvNet
@@ -14,26 +17,26 @@ import set_memory_size_tensorflow as sms
 
 
 def validate_image_generation(image_generator):
-    counter = 0
+    _counter = 0
     img = None
 
     for data_batch, labels_batch in image_generator:
         print(f'data batch size: {data_batch.shape}')
         print(f'label batch size: {labels_batch.shape}')
-        if counter > 5:
+        if _counter > 5:
             print(f'shape of image 0: {data_batch[0].shape}')
             img = data_batch[0]
             break
-        counter += 1
+        _counter += 1
 
 
-def plot_mse(training_loss, validation_loss, counter):
-    epochs = range(1, len(loss) + 1)
-    plt.plot(epochs, training_loss, 'bo', label='Training mse')
-    plt.plot(epochs, validation_loss, 'b', label='Validation mse')
+def plot_mse(training_loss, validation_loss, k_fold_path):
+    epochs = range(1, len(training_loss) + 1)
+    plt.plot(epochs, training_loss, 'b', label='Training MSE')
+    plt.plot(epochs, validation_loss, 'r', label='Validation MSE')
     plt.title('Training and validation MSE')
     plt.legend()
-    plt.savefig('train_val_mse_' + str(counter) + '.png')
+    plt.savefig(k_fold_path + '/train_vs_validation_mse' + '.png')
     plt.clf()
 
 
@@ -42,74 +45,106 @@ def show_rgb_matrix_as_image(rgb_matrix):
     plt.show()
 
 
-sms.set_memory_size()
-# maximum number of additional stacked convolutional-pooling layers
-max_n_extra_layers = 4
-# load csv data with pandas
-df = pd.read_csv(r'/home/adriano/Desktop/ds_agua_fria_garsup.csv')
-# select columns data to create the dataset
-df_dataset = df[['Rump', 'IMAGE']]
-# print dataset dimensions
-print(f'dataset dimension: {df_dataset.shape}')
-# cast dataset to numpy object in order to use k-fold cross-validation functionality from sklearn
-samples = df_dataset.to_numpy()
-# k-fold cross-validation with k=5
-kf = KFold(n_splits=5, shuffle=False)
-mean_tr_mse_vec = []
-mean_vl_mse_vec = []
-counter = 0
+def save_loss_vec(k_fold_path, file_name, loss_vec):
+    writer = csv.writer(open(k_fold_path + file_name, 'w'))
+    writer.writerow(loss_vec)
 
-# loop over cnn architectures
-for i in range(max_n_extra_layers):
-    ann_counter = 0
-    tr_mse_vec = []
-    vl_mse_vec = []
-    # create the base cnn model
-    conv_net = ConvNet()
-    # add additional layers
-    conv_net.add_layers(i)
-    # loop over each fold
-    for train, validation in kf.split(samples):
-        # print(train)
-        # print(validation)
-        # split dataset into training and validation datasets
-        df_train = df_dataset.loc[train]
-        df_validation = df_dataset.loc[validation]
-        # rescale image elements values to 0-1 range
-        train_data_gen = ImageDataGenerator(rescale=1. / 255)
-        val_data_gen = ImageDataGenerator(rescale=1. / 255)
-        # training image generator
-        train_gen = train_data_gen.flow_from_dataframe(dataframe=df_train,
+
+def save_model_summary(path, model):
+    # open the file
+    with open(path + '/model_summary.txt', 'w') as fh:
+        # pass the file handle in as a lambda function to make it callable
+        model.summary(print_fn=lambda x: fh.write(x + '\n'))
+
+
+def save_model(path, model):
+    model.save(path + '/model.hdf5')
+
+
+def run_k_fold_cv(save_model_path):
+    sms.set_memory_size()
+    # maximum number of additional stacked convolutional-pooling layers
+    max_n_extra_layers = 1
+    # load csv data with pandas
+    df = pd.read_csv(r'/home/adriano/Desktop/ds_garsup.csv')
+    # select columns data to create the dataset
+    df_dataset = df[['Rump', 'IMAGE']]
+    # print dataset dimensions
+    print(f'dataset dimension: {df_dataset.shape}')
+    # cast dataset to numpy object in order to use k-fold cross-validation functionality from sklearn
+    samples = df_dataset.to_numpy()
+    # k-fold cross-validation with k=5
+    kf = KFold(n_splits=5, shuffle=False)
+    mean_tr_mse_vec = []
+    mean_vl_mse_vec = []
+    cnn_counter = 0
+
+    # loop over cnn architectures
+    for i in range(max_n_extra_layers):
+        k_fold_counter = 1
+        tr_mse_vec = []
+        vl_mse_vec = []
+        # create the base cnn model
+        conv_net = ConvNet()
+        # add additional layers
+        conv_net.add_layers(i)
+        # create current cnn folder
+        cnn_path = os.path.join(save_model_path, 'cnn_' + str(cnn_counter))
+        os.makedirs(cnn_path)
+        # loop over each fold
+        for train, validation in kf.split(samples):
+            # print(train)
+            # print(validation)
+            # create k-fold cross-validation folder
+            k_fold_path = os.path.join(cnn_path, 'K_' + str(k_fold_counter))
+            os.makedirs(k_fold_path)
+            # split dataset into training and validation datasets
+            df_train = df_dataset.loc[train]
+            df_validation = df_dataset.loc[validation]
+            # rescale image elements values to 0-1 range
+            train_data_gen = ImageDataGenerator(rescale=1. / 255)
+            val_data_gen = ImageDataGenerator(rescale=1. / 255)
+            # training image generator
+            train_gen = train_data_gen.flow_from_dataframe(dataframe=df_train,
+                                                           x_col='IMAGE',
+                                                           y_col='Rump',
+                                                           target_size=(130, 240),
+                                                           class_mode='raw',
+                                                           batch_size=32)
+            # validation image generator
+            val_gen = val_data_gen.flow_from_dataframe(dataframe=df_validation,
                                                        x_col='IMAGE',
                                                        y_col='Rump',
                                                        target_size=(130, 240),
                                                        class_mode='raw',
                                                        batch_size=32)
-        # validation image generator
-        val_gen = val_data_gen.flow_from_dataframe(dataframe=df_validation,
-                                                   x_col='IMAGE',
-                                                   y_col='Rump',
-                                                   target_size=(130, 240),
-                                                   class_mode='raw',
-                                                   batch_size=32)
-        conv_net.configure()
-        conv_net.train(train_gen, val_gen)
-        loss = conv_net.history.history['mean_squared_error']
-        val_loss = conv_net.history.history['val_mean_squared_error']
-        plot_mse(loss, val_loss, ann_counter)
+            conv_net.configure()
+            conv_net.train(train_gen, val_gen)
+            train_loss = conv_net.history.history['mean_squared_error']
+            val_loss = conv_net.history.history['val_mean_squared_error']
+            # save training loss
+            save_loss_vec(k_fold_path, '/training_loss_vec.csv', train_loss)
+            # save validation loss
+            save_loss_vec(k_fold_path, '/validation_loss_vec.csv', val_loss)
+            # save model summary
+            save_model_summary(cnn_path, conv_net.model)
+            # save architecture
+            save_model(cnn_path, conv_net.model)
+            plot_mse(train_loss, val_loss, k_fold_path)
 
-        tr_mse_vec.append(loss[-1])
-        vl_mse_vec.append(val_loss[-1])
-        ann_counter += 1
+            tr_mse_vec.append(train_loss[-1])
+            vl_mse_vec.append(val_loss[-1])
+            k_fold_counter += 1
 
-    mean_tr_mse = np.array(tr_mse_vec).mean()
-    mean_vl_mse = np.array(vl_mse_vec).mean()
-    mean_tr_mse_vec.append(mean_tr_mse)
-    mean_vl_mse_vec.append(mean_vl_mse)
+        mean_tr_mse = np.array(tr_mse_vec).mean()
+        mean_vl_mse = np.array(vl_mse_vec).mean()
+        mean_tr_mse_vec.append(mean_tr_mse)
+        mean_vl_mse_vec.append(mean_vl_mse)
+        cnn_counter += 1
 
-plt.plot(np.arange(3, max_n_extra_layers + 3), mean_tr_mse_vec, 'r-')
-plt.plot(np.arange(3, max_n_extra_layers + 3), mean_vl_mse_vec, 'b-')
-plt.show()
+    plt.plot(np.arange(3, max_n_extra_layers + 3), mean_tr_mse_vec, 'r-')
+    plt.plot(np.arange(3, max_n_extra_layers + 3), mean_vl_mse_vec, 'b-')
+    plt.show()
 
 # create dataset
 # X = np.arange(0, 2 * np.pi, 0.05)

@@ -20,7 +20,7 @@ class ConvNet:
                 self.__model.add(layers.Conv2D(2 ** self.__filter_power, (3, 3), activation='relu'))
                 # self.__model.add(layers.Conv2D(2 ** self.__filter_power, (3, 3), activation='relu'))
                 self.__model.add(layers.MaxPool2D(2, 2))
-                self.__model.summary()
+                # self.__model.summary()
                 self.__filter_power += 1
             else:
                 self.__model.add(layers.Conv2D(2 ** self.__filter_power, (3, 3), activation='relu'))
@@ -47,13 +47,14 @@ class ConvNet:
 
     def train(self, train_generator, validation_generator):
         self.__history = self.__model.fit(train_generator,
-                                          steps_per_epoch=117,
-                                          epochs=1,
+                                          steps_per_epoch=202,
+                                          epochs=2,
                                           validation_data=validation_generator,
-                                          validation_steps=30)
+                                          validation_steps=51)
 
-    def save_model(self):
-        self.__model.save('test.hdf5')
+    @property
+    def model(self):
+        return self.__model
 
     @property
     def history(self):

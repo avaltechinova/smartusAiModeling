@@ -1,16 +1,17 @@
-# This is a sample Python script.
-
-# Press Shift+F10 to execute it or replace it with your code.
-# Press Double Shift to search everywhere for classes, files, tool windows, actions, and settings.
-
-
-def print_hi(name):
-    # Use a breakpoint in the code line below to debug your script.
-    print(f'Hi, {name}')  # Press Ctrl+F8 to toggle the breakpoint.
+from datetime import datetime
+import cross_validation as cv
+import os
 
 
-# Press the green button in the gutter to run the script.
 if __name__ == '__main__':
-    print_hi('PyCharm')
+    prefix = '/home/adriano/Desktop/avaltech/ai/models/'
+    current_day = datetime.now().date()
+    current_time = datetime.now().strftime('%H:%M:%S')
+    folder_day = os.path.join(prefix, str(current_day))
+    folder_time = os.path.join(folder_day, current_time)
+    path_exists = os.path.isdir(folder_time)
 
-# See PyCharm help at https://www.jetbrains.com/help/pycharm/
+    if not path_exists:
+        os.makedirs(folder_time)
+
+    cv.run_k_fold_cv(folder_time)
