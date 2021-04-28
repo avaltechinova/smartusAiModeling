@@ -61,16 +61,49 @@ def save_model(path, model):
     model.save(path + '/model.hdf5')
 
 
-def run_k_fold_cv(save_model_path):
+def predict(generator, conv_net, nr_samples, batch_size):
+    predictions = np.zeros(shape=nr_samples)
+    labels = np.zeros(shape=nr_samples)
+    i = 0
+    for inputs_batch, labels_batch in generator:
+        features_batch = conv_net.conv_base.predict(inputs_batch)
+        features_batch = np.reshape(features_batch, (len(labels_batch), 4 * 7 * 512))
+        prediction_batch = conv_net.model.predict(features_batch)
+        vra = prediction_batch.reshape(-1)
+        predictions[i * batch_size: (i + 1) * batch_size] = vra
+        labels[i * batch_size: (i + 1) * batch_size] = labels_batch
+        i += 1
+
+        if i * batch_size >= nr_samples:
+            break
+    return predictions, labels
+
+
+def run_k_fold_cv(save_model_path, data_augmentation=False, conv_base=None, body_part='garsup'):
     sms.set_memory_size()
     # maximum number of additional stacked convolutional-pooling layers
-    max_n_extra_layers = 1
-    # load csv data with pandas
-    df = pd.read_csv(r'/home/adriano/Desktop/ds_garsup.csv')
-    # select columns data to create the dataset
-    df_dataset = df[['Rump', 'IMAGE']]
+    max_n_extra_layers = 6
+    batch_size = 32
+    # load dataset
+    if body_part == 'garsup':
+        target = 'Rump'
+        # load csv data with pandas
+        df = pd.read_csv(r'/home/adriano/Desktop/avaltech/data_sets/dados_filtrados/filter_1/depth/ds_garsup.csv')
+        # get an image sample at random from each animal's image group id
+        filtered_df = df.groupby('RGN').apply(lambda x: x.sample(1)).reset_index(drop=True)
+        # select columns data to create the dataset
+        df_dataset = filtered_df[[target, 'IMAGE']]
+    else:
+        target = 'Rib Fat'
+        # load csv data with pandas
+        df = pd.read_csv(r'/home/adriano/Desktop/avaltech/data_sets/dados_filtrados/filter_1/depth/s_cossup.csv')
+        # get an image sample at random from each animal's image group id
+        filtered_df = df.groupby('RGN').apply(lambda x: x.sample(1)).reset_index(drop=True)
+        # select columns data to create the dataset
+        df_dataset = filtered_df[[target, 'IMAGE']]
+
     # print dataset dimensions
-    print(f'dataset dimension: {df_dataset.shape}')
+    print(f'original dataset dimension: {df_dataset.shape}')
     # cast dataset to numpy object in order to use k-fold cross-validation functionality from sklearn
     samples = df_dataset.to_numpy()
     # k-fold cross-validation with k=5
@@ -79,47 +112,75 @@ def run_k_fold_cv(save_model_path):
     mean_vl_mse_vec = []
     cnn_counter = 0
 
+    if data_augmentation:
+        # rescale image elements values to 0-1 range
+        train_data_gen = ImageDataGenerator(rescale=1. / 255,
+                                            vertical_flip=True,
+                                            horizontal_flip=True, )
+    else:
+        train_data_gen = ImageDataGenerator(rescale=1. / 255)
+
+    val_data_gen = ImageDataGenerator(rescale=1. / 255)
+
     # loop over cnn architectures
-    for i in range(max_n_extra_layers):
+    for i in range(5, max_n_extra_layers):
         k_fold_counter = 1
         tr_mse_vec = []
         vl_mse_vec = []
-        # create the base cnn model
-        conv_net = ConvNet()
-        # add additional layers
-        conv_net.add_layers(i)
         # create current cnn folder
         cnn_path = os.path.join(save_model_path, 'cnn_' + str(cnn_counter))
         os.makedirs(cnn_path)
+
         # loop over each fold
         for train, validation in kf.split(samples):
             # print(train)
             # print(validation)
+            print('--------------------------------------------')
+            print(f'CNN ID: {str(cnn_counter)} -- K-Fold: {str(k_fold_counter)}')
+            print('--------------------------------------------')
             # create k-fold cross-validation folder
             k_fold_path = os.path.join(cnn_path, 'K_' + str(k_fold_counter))
             os.makedirs(k_fold_path)
             # split dataset into training and validation datasets
             df_train = df_dataset.loc[train]
             df_validation = df_dataset.loc[validation]
-            # rescale image elements values to 0-1 range
-            train_data_gen = ImageDataGenerator(rescale=1. / 255)
-            val_data_gen = ImageDataGenerator(rescale=1. / 255)
             # training image generator
             train_gen = train_data_gen.flow_from_dataframe(dataframe=df_train,
                                                            x_col='IMAGE',
-                                                           y_col='Rump',
+                                                           y_col=target,
                                                            target_size=(130, 240),
                                                            class_mode='raw',
-                                                           batch_size=32)
+                                                           batch_size=batch_size)
+
             # validation image generator
             val_gen = val_data_gen.flow_from_dataframe(dataframe=df_validation,
                                                        x_col='IMAGE',
-                                                       y_col='Rump',
+                                                       y_col=target,
                                                        target_size=(130, 240),
                                                        class_mode='raw',
-                                                       batch_size=32)
-            conv_net.configure()
-            conv_net.train(train_gen, val_gen)
+                                                       batch_size=batch_size)
+
+            if conv_base is None:
+                # create the base cnn model
+                conv_net = ConvNet()
+                # add additional layers
+                conv_net.add_layers(i)
+                conv_net.add_dense_layers(nr_hidden_neurons=256)
+                conv_net.configure()
+                conv_net.train(train_gen, val_gen)
+            else:
+                conv_net = ConvNet(conv_base=conv_base)
+                train_features, train_labels = conv_net.extract_features(train_gen, batch_size, len(train))
+                validation_features, validation_labels = conv_net.extract_features(val_gen, batch_size, len(validation))
+                train_features = np.reshape(train_features, (len(train), 4 * 7 * 512))
+                validation_features = np.reshape(validation_features, (len(validation), 4 * 7 * 512))
+                conv_net.add_dense_layers(nr_hidden_neurons=256)
+                conv_net.configure()
+                conv_net.train(train_features, train_labels, validation_features, validation_labels, batch_size)
+
+            predictions = predict(val_gen, conv_net, len(validation), batch_size=batch_size)
+            df_outputs = pd.DataFrame.from_records(np.array(predictions).T, columns=['PREDICTION', 'TARGET'])
+            df_outputs.to_csv(k_fold_path + '/cnn_outputs_vs_val_targets.csv')
             train_loss = conv_net.history.history['mean_squared_error']
             val_loss = conv_net.history.history['val_mean_squared_error']
             # save training loss
@@ -142,8 +203,12 @@ def run_k_fold_cv(save_model_path):
         mean_vl_mse_vec.append(mean_vl_mse)
         cnn_counter += 1
 
-    plt.plot(np.arange(3, max_n_extra_layers + 3), mean_tr_mse_vec, 'r-')
-    plt.plot(np.arange(3, max_n_extra_layers + 3), mean_vl_mse_vec, 'b-')
+    save_loss_vec(save_model_path, '/mean_train_mse_vec.csv', mean_tr_mse_vec)
+    save_loss_vec(save_model_path, '/mean_val_mse_vec.csv', mean_vl_mse_vec)
+    plt.plot(mean_tr_mse_vec, 'b-', label='Mean Training MSE')
+    plt.plot(mean_vl_mse_vec, 'r-', label='Mean Validation MSE')
+    plt.title('CNNs performances on K-fold Cross-Validation')
+    plt.legend()
     plt.show()
 
 # create dataset
