@@ -1,6 +1,10 @@
 from datetime import datetime
+
+import modeling_config
+from modeling_config import TrainingConfig, CrossValidationConfig, ConvNetConfig
 import cross_validation as cv
 import os
+import pandas as pd
 
 
 if __name__ == '__main__':
@@ -18,4 +22,33 @@ if __name__ == '__main__':
     if not path_exists:
         os.makedirs(folder_time)
 
-    cv.run_k_fold_cv(folder_time, data_augmentation=False, conv_base='VGG16', body_part=body_part)
+    # load dataset
+    if body_part == 'garsup':
+        target = 'Rump'
+        # load csv data with pandas
+        df = \
+            pd.read_csv(r'/home/adriano/Desktop/avaltech/data_sets/dados_filtrados/filter_1/depth/dilate/weight'
+                        r'/ds_garsup_weight.csv')
+        # get an image sample at random from each animal's image group id
+        filtered_df = df.groupby('RGN').apply(lambda x: x.sample(1)).reset_index(drop=True)
+        # select columns data to create the dataset
+        df_dataset = filtered_df[[target, 'Weight', 'IMAGE']]
+    else:
+        target = 'Rib Fat'
+        # load csv data with pandas
+        df = pd.read_csv(r'/home/adriano/Desktop/avaltech/data_sets/dados_filtrados/filter_1/depth/ds_cossup.csv')
+        # get an image sample at random from each animal's image group id
+        filtered_df = df.groupby('RGN').apply(lambda x: x.sample(1)).reset_index(drop=True)
+        # select columns data to create the dataset
+        df_dataset = filtered_df[[target, 'IMAGE']]
+
+    # print dataset dimensions
+    print(f'original dataset dimension: {df_dataset.shape}')
+
+    # configuration of the modeling process
+    train_config = TrainingConfig(batch_size=32, nr_epochs=5000, data_augmentation=False)
+    validation_config = CrossValidationConfig(nr_splits=5, shuffle=False)
+    cnn_config = ConvNetConfig(conv_base='VGG16', nr_hidden_neurons=512, drop_out=0.5, learning_rate=1e-5)
+
+    modeling_config.save_configuration(folder_time, validation_config, train_config, cnn_config)
+    cv.run_k_fold_cv(folder_time, validation_config, train_config, cnn_config, df_dataset, target)

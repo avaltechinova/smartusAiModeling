@@ -5,12 +5,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 import pandas as pd
-from sklearn.metrics import mean_squared_error
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler, RobustScaler, MinMaxScaler
+
 from convnet import ConvNet
 from sklearn.model_selection import KFold
-from sklearn.model_selection import train_test_split
-from sklearn.neural_network import MLPRegressor
-from sklearn.preprocessing import StandardScaler
 from keras.preprocessing.image import ImageDataGenerator
 from matplotlib import pyplot as plt
 import set_memory_size_tensorflow as sms
@@ -61,13 +60,40 @@ def save_model(path, model):
     model.save(path + '/model.hdf5')
 
 
+def scale_input_for_dense_layer(x_train, x_test):
+    # scale input data
+    # robust_scale = RobustScaler()
+    # robust_scale.fit(x_train)
+    # x_train = robust_scale.transform(x_train)
+    # x_test = robust_scale.transform(x_test)
+    
+    min_max_scale = MinMaxScaler()
+    min_max_scale.fit(x_train)
+    x_train = min_max_scale.transform(x_train)
+    x_test = min_max_scale.transform(x_test)
+
+    return x_train, x_test
+
+
+def apply_pca(x_train, x_test):
+    nr_components = 1468
+    print("Extracting the top %d eigen faces from %d animals."
+          % (nr_components, x_train.shape[0]))
+    pca = PCA(n_components=nr_components, svd_solver='randomized',
+              whiten=True).fit(x_train)
+    x_train_pca = pca.transform(x_train)
+    x_test_pca = pca.transform(x_test)
+
+    return x_train_pca, x_test_pca
+
+
 def predict(generator, conv_net, nr_samples, batch_size):
     predictions = np.zeros(shape=nr_samples)
     labels = np.zeros(shape=nr_samples)
     i = 0
     for inputs_batch, labels_batch in generator:
         features_batch = conv_net.conv_base.predict(inputs_batch)
-        features_batch = np.reshape(features_batch, (len(labels_batch), 4 * 7 * 512))
+        features_batch = np.reshape(features_batch, (len(labels_batch), 5 * 7 * 512))
         prediction_batch = conv_net.model.predict(features_batch)
         vra = prediction_batch.reshape(-1)
         predictions[i * batch_size: (i + 1) * batch_size] = vra
@@ -79,40 +105,22 @@ def predict(generator, conv_net, nr_samples, batch_size):
     return predictions, labels
 
 
-def run_k_fold_cv(save_model_path, data_augmentation=False, conv_base=None, body_part='garsup'):
+def run_k_fold_cv(model_path, validation_config, train_config, cnn_config, df_dataset, target):
     sms.set_memory_size()
     # maximum number of additional stacked convolutional-pooling layers
     max_n_extra_layers = 6
-    batch_size = 32
-    # load dataset
-    if body_part == 'garsup':
-        target = 'Rump'
-        # load csv data with pandas
-        df = pd.read_csv(r'/home/adriano/Desktop/avaltech/data_sets/dados_filtrados/filter_1/depth/ds_garsup.csv')
-        # get an image sample at random from each animal's image group id
-        filtered_df = df.groupby('RGN').apply(lambda x: x.sample(1)).reset_index(drop=True)
-        # select columns data to create the dataset
-        df_dataset = filtered_df[[target, 'IMAGE']]
-    else:
-        target = 'Rib Fat'
-        # load csv data with pandas
-        df = pd.read_csv(r'/home/adriano/Desktop/avaltech/data_sets/dados_filtrados/filter_1/depth/s_cossup.csv')
-        # get an image sample at random from each animal's image group id
-        filtered_df = df.groupby('RGN').apply(lambda x: x.sample(1)).reset_index(drop=True)
-        # select columns data to create the dataset
-        df_dataset = filtered_df[[target, 'IMAGE']]
-
-    # print dataset dimensions
-    print(f'original dataset dimension: {df_dataset.shape}')
+    batch_size = train_config.batch_size
     # cast dataset to numpy object in order to use k-fold cross-validation functionality from sklearn
     samples = df_dataset.to_numpy()
+    # normalize animals weights to the 0-1 interval
+    normalized_animal_weights = df_dataset['Weight'] / df_dataset['Weight'].max()
     # k-fold cross-validation with k=5
-    kf = KFold(n_splits=5, shuffle=False)
+    kf = KFold(n_splits=validation_config.nr_splits, shuffle=validation_config.shuffle)
     mean_tr_mse_vec = []
     mean_vl_mse_vec = []
     cnn_counter = 0
 
-    if data_augmentation:
+    if train_config.data_augmentation:
         # rescale image elements values to 0-1 range
         train_data_gen = ImageDataGenerator(rescale=1. / 255,
                                             vertical_flip=True,
@@ -128,7 +136,7 @@ def run_k_fold_cv(save_model_path, data_augmentation=False, conv_base=None, body
         tr_mse_vec = []
         vl_mse_vec = []
         # create current cnn folder
-        cnn_path = os.path.join(save_model_path, 'cnn_' + str(cnn_counter))
+        cnn_path = os.path.join(model_path, 'cnn_' + str(cnn_counter))
         os.makedirs(cnn_path)
 
         # loop over each fold
@@ -148,7 +156,7 @@ def run_k_fold_cv(save_model_path, data_augmentation=False, conv_base=None, body
             train_gen = train_data_gen.flow_from_dataframe(dataframe=df_train,
                                                            x_col='IMAGE',
                                                            y_col=target,
-                                                           target_size=(130, 240),
+                                                           target_size=(180, 240),
                                                            class_mode='raw',
                                                            batch_size=batch_size)
 
@@ -156,27 +164,49 @@ def run_k_fold_cv(save_model_path, data_augmentation=False, conv_base=None, body
             val_gen = val_data_gen.flow_from_dataframe(dataframe=df_validation,
                                                        x_col='IMAGE',
                                                        y_col=target,
-                                                       target_size=(130, 240),
+                                                       target_size=(180, 240),
                                                        class_mode='raw',
                                                        batch_size=batch_size)
 
-            if conv_base is None:
+            if cnn_config.conv_base is None:
                 # create the base cnn model
                 conv_net = ConvNet()
                 # add additional layers
                 conv_net.add_layers(i)
-                conv_net.add_dense_layers(nr_hidden_neurons=256)
-                conv_net.configure()
-                conv_net.train(train_gen, val_gen)
+                conv_net.add_dense_layers(cnn_config.nr_hidden_neurons)
+                conv_net.configure(cnn_config.learning_rate)
+                conv_net.train(train_gen,
+                               val_gen,
+                               train_config.steps_per_epoch(len(train)),
+                               train_config.nr_epochs,
+                               validation_config.validation_steps(len(validation)))
             else:
-                conv_net = ConvNet(conv_base=conv_base)
+                conv_net = ConvNet(conv_base=cnn_config.conv_base)
                 train_features, train_labels = conv_net.extract_features(train_gen, batch_size, len(train))
                 validation_features, validation_labels = conv_net.extract_features(val_gen, batch_size, len(validation))
-                train_features = np.reshape(train_features, (len(train), 4 * 7 * 512))
-                validation_features = np.reshape(validation_features, (len(validation), 4 * 7 * 512))
-                conv_net.add_dense_layers(nr_hidden_neurons=256)
-                conv_net.configure()
-                conv_net.train(train_features, train_labels, validation_features, validation_labels, batch_size)
+                train_features = np.reshape(train_features, (len(train), 5 * 7 * 512))
+                validation_features = np.reshape(validation_features, (len(validation), 5 * 7 * 512))
+                # min_feature, max_feature = train_features.min(), train_features.max()
+                # min_val_feature, max_val_feature = validation_features.min(), validation_features.max()
+                # scaled_train_input, scaled_validation = \
+                #     scale_input_for_dense_layer(train_features, validation_features)
+                # min_vra1, max_vra1 = scaled_train_input.min(), scaled_train_input.max()
+                # sorted_train = np.sort(train_features)
+                # sorted_val = np.sort(validation_features)
+                # min_vra2, max_vra2 = scaled_validation.min(), scaled_validation.max()
+                train_animal_weights = np.reshape(normalized_animal_weights[train].to_numpy(), (len(train), 1))
+                val_animal_weights = np.reshape(normalized_animal_weights[validation].to_numpy(), (len(validation), 1))
+                train_features = np.concatenate([train_features, train_animal_weights], axis=1)
+                validation_features = np.concatenate([validation_features, val_animal_weights], axis=1)
+                conv_net.add_dense_layers(drop_out=cnn_config.drop_out,
+                                          nr_hidden_neurons=cnn_config.nr_hidden_neurons)
+                conv_net.configure(cnn_config.learning_rate)
+                conv_net.train(train_features,
+                               train_labels,
+                               validation_features,
+                               validation_labels,
+                               train_config.nr_epochs,
+                               batch_size)
 
             predictions = predict(val_gen, conv_net, len(validation), batch_size=batch_size)
             df_outputs = pd.DataFrame.from_records(np.array(predictions).T, columns=['PREDICTION', 'TARGET'])
@@ -203,13 +233,13 @@ def run_k_fold_cv(save_model_path, data_augmentation=False, conv_base=None, body
         mean_vl_mse_vec.append(mean_vl_mse)
         cnn_counter += 1
 
-    save_loss_vec(save_model_path, '/mean_train_mse_vec.csv', mean_tr_mse_vec)
-    save_loss_vec(save_model_path, '/mean_val_mse_vec.csv', mean_vl_mse_vec)
-    plt.plot(mean_tr_mse_vec, 'b-', label='Mean Training MSE')
-    plt.plot(mean_vl_mse_vec, 'r-', label='Mean Validation MSE')
-    plt.title('CNNs performances on K-fold Cross-Validation')
-    plt.legend()
-    plt.show()
+    save_loss_vec(model_path, '/mean_train_mse_vec.csv', mean_tr_mse_vec)
+    save_loss_vec(model_path, '/mean_val_mse_vec.csv', mean_vl_mse_vec)
+    # plt.plot(mean_tr_mse_vec, 'b-', label='Mean Training MSE')
+    # plt.plot(mean_vl_mse_vec, 'r-', label='Mean Validation MSE')
+    # plt.title('CNNs performances on K-fold Cross-Validation')
+    # plt.legend()
+    # plt.show()
 
 # create dataset
 # X = np.arange(0, 2 * np.pi, 0.05)

@@ -1,6 +1,7 @@
 from keras import layers
 from keras import models
 from keras import optimizers
+from keras import regularizers
 import numpy as np
 
 
@@ -12,14 +13,14 @@ class ConvNet:
 
         if conv_base is None:
             # simplest stacked convolutional-pooling layer
-            self.__model.add(layers.Conv2D(32, (3, 3), padding='same', activation='relu', input_shape=(130, 240, 3)))
+            self.__model.add(layers.Conv2D(32, (3, 3), padding='same', activation='relu', input_shape=(180, 240, 3)))
             # self.__model.add(layers.Conv2D(32, (3, 3), activation='relu'))
             self.__model.add(layers.MaxPool2D(2, 2))
         elif conv_base == 'VGG16':
             from keras.applications import VGG16
             self.__conv_base = VGG16(weights='imagenet',
                                      include_top=False,
-                                     input_shape=(130, 240, 3))
+                                     input_shape=(180, 240, 3))
 
     def add_layers(self, nr_layers):
         # layers set by the user
@@ -44,35 +45,37 @@ class ConvNet:
         # dropout layer
         self.__model.add(layers.Dropout(0.5))
 
-    def add_dense_layers(self, nr_hidden_neurons=256, activation_func='relu'):
+    def add_dense_layers(self, drop_out, nr_hidden_neurons=256, activation_func='relu'):
         # dense layers
-        self.__model.add(layers.Dense(nr_hidden_neurons, activation=activation_func, input_dim=4 * 7 * 512))
-        # dropout layer
-        self.__model.add(layers.Dropout(0.5))
+        self.__model.add(layers.Dense(nr_hidden_neurons,
+                                      activation=activation_func))
+        if drop_out is not None:
+            # dropout layer
+            self.__model.add(layers.Dropout(drop_out))
         # output layer
         self.__model.add(layers.Dense(1))
 
-    def configure(self):
+    def configure(self, learning_rate):
         self.__model.compile(loss='mean_squared_error',
-                             optimizer=optimizers.RMSprop(lr=1e-4),
+                             optimizer=optimizers.Adam(amsgrad=True, lr=learning_rate, epsilon=0.1),
                              metrics=['mean_squared_error'])
 
-    def train(self, train_generator, validation_generator):
+    def train(self, train_generator, validation_generator, steps_per_epoch, nr_epochs, val_steps):
         self.__history = self.__model.fit(train_generator,
-                                          steps_per_epoch=128,
-                                          epochs=30,
+                                          steps_per_epoch=steps_per_epoch,
+                                          epochs=nr_epochs,
                                           validation_data=validation_generator,
-                                          validation_steps=32)
+                                          validation_steps=val_steps)
 
-    def train(self, train_features, train_labels, val_features, val_labels, batch_size):
+    def train(self, train_features, train_labels, val_features, val_labels, nr_of_epochs, batch_size):
         self.__history = self.__model.fit(train_features,
                                           train_labels,
-                                          epochs=30,
+                                          epochs=nr_of_epochs,
                                           batch_size=batch_size,
                                           validation_data=(val_features, val_labels))
 
     def extract_features(self, generator, batch_size, nr_samples):
-        features = np.zeros(shape=(nr_samples, 4, 7, 512))
+        features = np.zeros(shape=(nr_samples, 5, 7, 512))
         labels = np.zeros(shape=nr_samples)
         i = 0
         for inputs_batch, labels_batch in generator:
