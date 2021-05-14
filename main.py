@@ -1,7 +1,7 @@
 from datetime import datetime
 
 import modeling_config
-from modeling_config import TrainingConfig, CrossValidationConfig, ConvNetConfig
+from modeling_config import TrainingConfig, CrossValidationConfig, ConvNetConfig, DataConfig
 import cross_validation as cv
 import os
 import pandas as pd
@@ -27,12 +27,12 @@ if __name__ == '__main__':
         target = 'Rump'
         # load csv data with pandas
         df = \
-            pd.read_csv(r'/home/adriano/Desktop/avaltech/data_sets/dados_filtrados/filter_1/depth/dilate/weight'
-                        r'/ds_garsup_weight.csv')
+            pd.read_csv(r'/home/adriano/Desktop/avaltech/data_sets/dados_filtrados/'
+                        r'ds_garsup.csv')
         # get an image sample at random from each animal's image group id
         filtered_df = df.groupby('RGN').apply(lambda x: x.sample(1)).reset_index(drop=True)
         # select columns data to create the dataset
-        df_dataset = filtered_df[[target, 'Weight', 'IMAGE']]
+        df_dataset = filtered_df[[target, 'IMAGE']]
     else:
         target = 'Rib Fat'
         # load csv data with pandas
@@ -46,9 +46,25 @@ if __name__ == '__main__':
     print(f'original dataset dimension: {df_dataset.shape}')
 
     # configuration of the modeling process
-    train_config = TrainingConfig(batch_size=32, nr_epochs=5000, data_augmentation=False)
-    validation_config = CrossValidationConfig(nr_splits=5, shuffle=False)
-    cnn_config = ConvNetConfig(conv_base='VGG16', nr_hidden_neurons=512, drop_out=0.5, learning_rate=1e-5)
+    # training configuration
+    train_config = TrainingConfig(batch_size=64,
+                                  nr_epochs=200,
+                                  data_augmentation=False,
+                                  outlier_detect=False,
+                                  fine_tuning=False)
+    # validation configuration
+    validation_config = CrossValidationConfig(nr_splits=5,
+                                              shuffle=True)
 
-    modeling_config.save_configuration(folder_time, validation_config, train_config, cnn_config)
-    cv.run_k_fold_cv(folder_time, validation_config, train_config, cnn_config, df_dataset, target)
+    # CNN configuration
+    regularizers = {'l1': 0., 'l2': 0.}
+    cnn_config = ConvNetConfig(conv_base='VGG16',
+                               nr_hidden_neurons=256,
+                               drop_out=0.5,
+                               learning_rate=1e-6,
+                               regularizers=regularizers)
+
+    data_config = DataConfig(animal_weight=False)
+
+    modeling_config.save_configuration(folder_time, validation_config, train_config, cnn_config, data_config)
+    cv.run_k_fold_cv(folder_time, validation_config, train_config, cnn_config, df_dataset, target, data_config)
